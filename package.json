@@ -1,0 +1,32 @@
+{
+  "name": "meeting-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Engineering Meeting Copilot - LiveKit meeting with an AI participant that answers engineering questions from a pre-indexed codebase",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "dev:server": "npm run dev -w @copilot/server",
+    "dev:agent": "npm run dev -w @copilot/agent",
+    "dev:web": "npm run dev -w @copilot/web",
+    "index": "npm run index -w @copilot/knowledge --",
+    "search": "npm run search -w @copilot/knowledge --",
+    "qdrant:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-qdrant.ps1",
+    "qdrant": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-qdrant.ps1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

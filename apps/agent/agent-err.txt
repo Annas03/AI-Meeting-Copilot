@@ -1,0 +1,17 @@
+D:\Work\meeting-copilot\node_modules\@livekit\agents\src\worker.ts:368
+      throw new MissingCredentialsError(
+            ^
+
+MissingCredentialsError: API Key is required: Set LIVEKIT_API_KEY, run with --api-key, or pass apiKey in ServerOptions
+    at new AgentServer (D:\Work\meeting-copilot\node_modules\@livekit\agents\src\worker.ts:368:13)
+    at runServer (D:\Work\meeting-copilot\node_modules\@livekit\agents\src\cli.ts:45:18)
+    at Command.<anonymous> (D:\Work\meeting-copilot\node_modules\@livekit\agents\src\cli.ts:190:7)
+    at Command.listener [as _actionHandler] (D:\Work\meeting-copilot\node_modules\commander\lib\command.js:542:17)
+    at D:\Work\meeting-copilot\node_modules\commander\lib\command.js:1502:14
+    at Command._chainOrCall (D:\Work\meeting-copilot\node_modules\commander\lib\command.js:1386:12)
+    at Command._parseCommand (D:\Work\meeting-copilot\node_modules\commander\lib\command.js:1501:27)
+    at D:\Work\meeting-copilot\node_modules\commander\lib\command.js:1265:27
+    at Command._chainOrCall (D:\Work\meeting-copilot\node_modules\commander\lib\command.js:1386:12)
+    at Command._dispatchSubcommand (D:\Work\meeting-copilot\node_modules\commander\lib\command.js:1261:25)
+
+Node.js v24.16.0

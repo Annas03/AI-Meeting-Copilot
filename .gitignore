@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+build/
+*.tsbuildinfo
+
+# local data (PGlite database, Qdrant storage, downloaded binaries)
+data/
+tools/
+
+!.env.example
+.env
+
+# logs
+*.log
+logs/
+
+# editor / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# test output
+coverage/

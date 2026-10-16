@@ -1,0 +1,31 @@
+{
+  "name": "@copilot/knowledge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codebase indexing (discover, chunk, embed, store in Qdrant) and semantic retrieval",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "index": "tsx src/cli.ts index",
+    "search": "tsx src/cli.ts search",
+    "projects": "tsx src/cli.ts projects"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.19.0",
+    "dotenv": "^18.0.8",
+    "fast-glob": "^3.3.3",
+    "ignore": "^7.0.12",
+    "simple-git": "^4.0.2",
+    "voyageai": "^0.4.0",
+    "zod": "^4.6.7"
+  }
+}

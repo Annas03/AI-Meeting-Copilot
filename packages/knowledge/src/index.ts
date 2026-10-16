@@ -1,0 +1,15 @@
+export { chunkFile, detectContentType, detectLanguage, embeddingTextFor } from './chunker.js';
+export type { Chunk, ChunkOptions, ContentType } from './chunker.js';
+export { discoverFiles, looksBinary, looksLikeSecret, DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS } from './discover.js';
+export type { DiscoverOptions, DiscoverResult, DiscoveredFile, SkippedFile } from './discover.js';
+export { createEmbeddingProvider, EmbeddingError, FakeEmbeddingProvider, VoyageEmbeddingProvider } from './embeddings/index.js';
+export type { EmbeddingProvider } from './embeddings/index.js';
+export { QdrantChunkStore } from './store/qdrant.js';
+export type { ChunkPayload, ChunkPoint, ScoredChunk, SearchFilter } from './store/qdrant.js';
+export { indexRepository, chunkPointId, sha256 } from './indexer.js';
+export type { IndexProgress, IndexRepositoryOptions, IndexRepositoryResult } from './indexer.js';
+export { readManifest, writeManifest, listManifests, ManifestSchema } from './manifest.js';
+export type { Manifest } from './manifest.js';
+export { Knowledge } from './knowledge.js';
+export type { IndexOptions, KnowledgeOptions, SearchHit, SearchOptions } from './knowledge.js';
+export { loadRootEnv, findRepoRoot, dataDir } from './env.js';
