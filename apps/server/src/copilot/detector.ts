@@ -2,14 +2,14 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import type { TranscriptSegment } from '@copilot/shared';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
-import { anthropic, models, withTimeout } from '../llm/client.js';
+import { anthropic, effortFor, models, withTimeout } from '../llm/client.js';
 import { CLASSIFIER_SYSTEM } from './prompts.js';
 
 const INTERROGATIVE =
   /^(can|could|would|should|will|is|are|do|does|did|how|what|why|where|which|when|who|have|has|any|anyone|might|may|shall|isn't|aren't|doesn't|don't|wouldn't|couldn't|shouldn't)\b/i;
 
 const TECH_HINTS =
-  /\b(api|endpoint|schema|database|db|table|migration|auth|permission|role|token|feature|support|integrat\w*|implement\w*|build|add|change|refactor|deploy|config\w*|module|component|service|frontend|backend|query|cache|socket|websocket|webhook|latency|performance|scale|test|bug|error|crash|timeout|version|upgrade|library|package|sdk|repo|code|codebase|function|class|workflow|template|report|dashboard|notification|login|signup|organi[sz]ation|org|user|tenant|multi|i18n|locale|translation|payment|billing|email|sms|push|mobile|ios|android|web|server|client|react|node|typescript|redux|store|state|form|validation|upload|file|image|pdf|export|import|search|filter|sort|pagination|audit|log|logging|metric|monitor|cron|job|queue|event|stream)\b/i;
+  /\b(api|endpoint|schema|database|db|table|migration|auth|permission|role|token|feature|support|integrat\w*|implement\w*|build|add|change|refactor|deploy|config\w*|module|component|service|frontend|backend|query|cache|socket|websocket|webhook|latency|performance|scale|test|bug|error|crash|timeout|version|upgrade|library|package|sdk|repo|code|codebase|function|class|workflow|template|report|dashboard|notification|login|signup|organi[sz]ation|org|user|tenant|multi|i18n|locale|translation|payment|billing|email|sms|push|mobile|ios|android|web|server|client|react|node|typescript|redux|store|state|form|validation|upload|file|image|pdf|export|import|search|filter|sort|pagination|audit|log|logging|metric|monitor|cron|job|queue|event|stream)s?\b/i;
 
 /** Cheap gate so the classifier is only called for lines that could plausibly be engineering questions. */
 export function looksLikeQuestion(text: string): boolean {
@@ -69,13 +69,14 @@ export class QuestionDetector {
         .map((s) => `${s.speakerName ?? s.speakerId}: ${s.text}`)
         .join('\n');
       const user = `Recent transcript (oldest first):\n${recent || '(none)'}\n\nCandidate line (${input.candidate.speakerName ?? input.candidate.speakerId}): "${input.candidate.text.trim()}"`;
+      const effort = await effortFor(models.classifier, 'low');
       const response = await withTimeout(
         client.messages.parse({
           model: models.classifier,
           max_tokens: 400,
           system: [{ type: 'text', text: CLASSIFIER_SYSTEM, cache_control: { type: 'ephemeral' } }],
           messages: [{ role: 'user', content: user }],
-          output_config: { format: zodOutputFormat(ClassificationSchema), effort: 'low' },
+          output_config: { format: zodOutputFormat(ClassificationSchema), ...effort },
         }),
         this.timeoutMs,
         'question classification',
@@ -86,8 +87,10 @@ export class QuestionDetector {
       const question = parsed.question.trim() || input.candidate.text.trim();
       return { question, category: parsed.category, confidence: parsed.confidence };
     } catch (err) {
+      // Same as running without a key: the line already passed the heuristic gate. Don't also require a "?",
+      // speech-to-text transcripts usually have no punctuation.
       this.options.logger.warn({ err }, 'question classification failed; falling back to heuristics');
-      return /\?\s*$/.test(input.candidate.text) ? { question: input.candidate.text.trim(), category: 'technical', confidence: 0.4 } : null;
+      return { question: input.candidate.text.trim(), category: 'technical', confidence: 0.4 };
     }
   }
 }

@@ -3,7 +3,7 @@ import type { SearchHit } from '@copilot/knowledge';
 import type { Answer, Assessment, EvidenceRef, MeetingState, TranscriptSegment } from '@copilot/shared';
 import { config } from '../config.js';
 import type { Logger } from '../logger.js';
-import { models, requireAnthropic } from '../llm/client.js';
+import { effortFor, models, requireAnthropic } from '../llm/client.js';
 import { ANSWER_SYSTEM } from './prompts.js';
 
 export interface AnswerContext {
@@ -111,7 +111,7 @@ async function runStream(input: StreamAnswerInput, userPrompt: string, useFallba
     max_tokens: 2048,
     system: [{ type: 'text' as const, text: ANSWER_SYSTEM, cache_control: { type: 'ephemeral' as const } }],
     messages: [{ role: 'user' as const, content: userPrompt }],
-    output_config: { effort: config.ANSWER_EFFORT },
+    output_config: await effortFor(models.answer, config.ANSWER_EFFORT),
   };
   const requestOptions = input.signal ? { signal: input.signal } : {};
 

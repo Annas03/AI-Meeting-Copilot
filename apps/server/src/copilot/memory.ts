@@ -8,7 +8,7 @@ import type { Database } from '../db/index.js';
 import { meetingStates } from '../db/schema.js';
 import type { EventHub } from '../events/hub.js';
 import type { Logger } from '../logger.js';
-import { anthropic, models, withTimeout } from '../llm/client.js';
+import { anthropic, effortFor, models, withTimeout } from '../llm/client.js';
 import { MEMORY_SYSTEM } from './prompts.js';
 
 const StateUpdateSchema = z.object({
@@ -164,6 +164,7 @@ export class MeetingMemory {
       actionItems: state.actionItems.map((a) => ({ text: a.text, owner: a.owner ?? null, status: a.status })),
       investigations: state.investigations.map((i) => `${i.question} -> ${i.assessment ?? i.status}`),
     };
+    const effort = await effortFor(models.memory, 'low');
     const response = await withTimeout(
       client.messages.parse({
         model: models.memory,
@@ -175,7 +176,7 @@ export class MeetingMemory {
             content: `Previous memory (JSON):\n${JSON.stringify(previous, null, 1)}\n\nNew transcript lines (oldest first):\n${lines}\n\nReturn the updated memory.`,
           },
         ],
-        output_config: { format: zodOutputFormat(StateUpdateSchema), effort: 'low' },
+        output_config: { format: zodOutputFormat(StateUpdateSchema), ...effort },
       }),
       45_000,
       'meeting memory update',

@@ -4,7 +4,7 @@ import type { Database } from '../db/index.js';
 import { briefings } from '../db/schema.js';
 import type { EventHub } from '../events/hub.js';
 import type { Logger } from '../logger.js';
-import { anthropic, models, withTimeout } from '../llm/client.js';
+import { anthropic, effortFor, models, withTimeout } from '../llm/client.js';
 import type { MeetingMemory } from './memory.js';
 import { BRIEFING_SYSTEM } from './prompts.js';
 
@@ -81,13 +81,14 @@ export class BriefingService {
       markdown = templateBriefing(state);
     } else {
       try {
+        const effort = await effortFor(models.memory, 'low');
         const response = await withTimeout(
           client.messages.create({
             model: models.memory,
             max_tokens: 600,
             system: [{ type: 'text', text: BRIEFING_SYSTEM, cache_control: { type: 'ephemeral' } }],
             messages: [{ role: 'user', content: `Meeting memory (JSON):\n${JSON.stringify(stripForBriefing(state), null, 1)}` }],
-            output_config: { effort: 'low' },
+            output_config: effort,
           }),
           30_000,
           'briefing generation',
