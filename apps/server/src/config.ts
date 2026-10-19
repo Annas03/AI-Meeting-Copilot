@@ -13,10 +13,6 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.string().default('info'),
   WEB_ORIGIN: z.string().optional(),
 
-  LIVEKIT_URL: z.string().optional(),
-  LIVEKIT_API_KEY: z.string().optional(),
-  LIVEKIT_API_SECRET: z.string().optional(),
-
   ANTHROPIC_API_KEY: z.string().optional(),
   ANSWER_MODEL: z.string().default('claude-opus-5-5'),
   MEMORY_MODEL: z.string().default('claude-opus-5-5'),
@@ -33,7 +29,7 @@ const EnvSchema = z.object({
   MEMORY_BATCH_SEGMENTS: z.coerce.number().int().min(1).default(5),
   MEMORY_MAX_WAIT_MS: z.coerce.number().int().min(1000).default(45_000),
 
-  /** Recall.ai meeting bots (attach the copilot to Zoom / Google Meet). 'fake' selects the offline provider outside production. */
+  /** Recall.ai meeting bots (the copilot joins Zoom / Google Meet calls). 'fake' selects the offline provider outside production. */
   RECALL_API_KEY: z.string().optional(),
   RECALL_REGION: z.preprocess(blankToUndefined, z.enum(['us-east-1', 'us-west-2', 'eu-central-1', 'ap-northeast-1']).default('us-east-1')),
   /** Svix signing secret (whsec_...) from the Recall dashboard; unset = webhook signatures are not verified. */
@@ -42,7 +38,6 @@ const EnvSchema = z.object({
   /** Public https base URL of this server, reachable by Recall for webhooks (an ngrok/cloudflared tunnel in dev). */
   PUBLIC_SERVER_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
 
-  INTERNAL_API_SECRET: z.string().default('change-me-to-a-long-random-string'),
   DEFAULT_PROJECT_ID: z.string().default('default'),
   DATA_DIR: z.string().default('./data'),
 });
@@ -62,9 +57,7 @@ export const config = {
   dataDir: path.resolve(repoRoot, env.DATA_DIR),
   isProduction: env.NODE_ENV === 'production',
   devRoutes: env.NODE_ENV !== 'production',
-  livekitConfigured: Boolean(env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET),
   anthropicConfigured: Boolean(env.ANTHROPIC_API_KEY),
-  internalSecretIsDefault: env.INTERNAL_API_SECRET === 'change-me-to-a-long-random-string',
   recallFake: env.RECALL_API_KEY === 'fake' && env.NODE_ENV !== 'production',
   recallConfigured: Boolean(env.RECALL_API_KEY && env.PUBLIC_SERVER_URL) && !(env.RECALL_API_KEY === 'fake' && env.NODE_ENV === 'production'),
   recallBaseUrl: `https://${env.RECALL_REGION}.recall.ai`,

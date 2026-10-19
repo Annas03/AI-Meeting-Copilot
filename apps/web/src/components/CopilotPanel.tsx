@@ -20,10 +20,9 @@ export function CopilotPanel({ session, meeting }: Props) {
   const [tab, setTab] = useState<Tab>('copilot');
 
   const running = state.investigationOrder.filter((id) => state.investigations[id]?.status === 'running').length;
-  const external = meeting.source === 'recall';
 
   return (
-    <aside className={`copilot-panel${external ? ' with-bot-bar' : ''}`}>
+    <aside className="copilot-panel">
       <header className="panel-header">
         <div>
           <strong>Copilot</strong>
@@ -35,7 +34,7 @@ export function CopilotPanel({ session, meeting }: Props) {
         </div>
       </header>
 
-      {external && <BotStatusBar meeting={meeting} session={session} botStatus={state.botStatus ?? meeting.botStatus} detail={state.agentDetail} />}
+      <BotStatusBar meeting={meeting} session={session} botStatus={state.botStatus ?? meeting.botStatus} detail={state.agentDetail} />
 
       <nav className="tabs">
         <button className={tab === 'copilot' ? 'active' : ''} onClick={() => setTab('copilot')}>

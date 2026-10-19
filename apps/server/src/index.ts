@@ -20,10 +20,8 @@ import { MeetingService } from './meetings/service.js';
 const VERSION = '0.1.0';
 
 async function main(): Promise<void> {
-  if (config.internalSecretIsDefault) logger.warn('INTERNAL_API_SECRET is the default value; set a random secret in .env');
-  if (!config.livekitConfigured) logger.warn('LiveKit is not configured; meetings run in text-only mode until LIVEKIT_* are set');
   if (!config.anthropicConfigured) logger.warn('ANTHROPIC_API_KEY is not set; answers and memory run in degraded mode');
-  if (config.RECALL_API_KEY && !config.PUBLIC_SERVER_URL) logger.warn('RECALL_API_KEY is set but PUBLIC_SERVER_URL is not; attaching to Zoom / Google Meet is disabled');
+  if (!config.recallConfigured) logger.warn('RECALL_API_KEY and PUBLIC_SERVER_URL are required to create meetings; existing meetings stay readable');
   if (config.recallConfigured && !config.RECALL_WEBHOOK_SECRET) logger.warn('RECALL_WEBHOOK_SECRET is not set; Recall webhook signatures are not verified');
 
   const { db, close } = await openDatabase(config.dataDir);
@@ -106,7 +104,6 @@ async function main(): Promise<void> {
     logger.info(
       {
         port: config.PORT,
-        livekit: config.livekitConfigured,
         anthropic: config.anthropicConfigured,
         recall: config.recallConfigured,
         models: { answer: config.ANSWER_MODEL, classifier: config.CLASSIFIER_MODEL, memory: config.MEMORY_MODEL },

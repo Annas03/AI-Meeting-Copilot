@@ -28,7 +28,7 @@ export interface UtteranceSlot {
 
 /**
  * Pure: one in-flight segmentId per (bot, speaker). Partials reuse the slot's id, a final closes the slot
- * so the speaker's next utterance gets a fresh id; this is the same contract the LiveKit agent follows.
+ * so the speaker's next utterance gets a fresh id.
  */
 export function pairUtterance(
   slot: UtteranceSlot | undefined,
@@ -69,8 +69,8 @@ export interface BotMeetingManagerDeps {
 }
 
 /**
- * Drives meetings whose audio comes from a bot in an external call: sends the bot, turns provider
- * webhooks into transcript segments and agent status, and ends the meeting when the bot leaves.
+ * Owns the meeting lifecycle: sends a bot into the Zoom / Google Meet call, turns provider webhooks
+ * into transcript segments and agent status, and ends the meeting when the bot leaves.
  */
 export class BotMeetingManager {
   private readonly meetingByBot = new Map<string, string>();
@@ -82,13 +82,12 @@ export class BotMeetingManager {
 
   constructor(private readonly deps: BotMeetingManagerDeps) {}
 
-  async createExternalMeeting(input: { title: string; projectId?: string; meetingUrl: string }): Promise<MeetingSummary> {
+  async createMeeting(input: { title: string; projectId?: string; meetingUrl: string }): Promise<MeetingSummary> {
     const platform = platformFromUrl(input.meetingUrl);
     if (!SUPPORTED_PLATFORMS.includes(platform)) throw new UnsupportedMeetingUrlError();
     const meeting = await this.deps.meetings.createMeeting({
       title: input.title,
       ...(input.projectId ? { projectId: input.projectId } : {}),
-      source: 'recall',
       platform,
       meetingUrl: input.meetingUrl,
     });

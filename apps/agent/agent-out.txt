@@ -1,4 +1,0 @@
-
-> @copilot/agent@0.1.0 start
-> tsx src/main.ts start
-

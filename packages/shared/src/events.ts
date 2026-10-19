@@ -6,7 +6,7 @@ import { ASSESSMENTS } from './constants.js';
 // ---------------------------------------------------------------------------
 
 export const ParticipantSchema = z.object({
-  /** LiveKit participant identity (stable per join). */
+  /** Companion-panel participant identity (stable per join). */
   identity: z.string().min(1),
   /** Display name. */
   name: z.string().min(1),
@@ -126,19 +126,15 @@ export type Briefing = z.infer<typeof BriefingSchema>;
 export const AgentStatusSchema = z.enum(['connecting', 'listening', 'disconnected', 'error']);
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 
-/** Where a meeting's audio comes from: our own LiveKit room, or a Recall.ai bot sitting in an external meeting. */
-export const MeetingSourceSchema = z.enum(['livekit', 'recall']);
-export type MeetingSource = z.infer<typeof MeetingSourceSchema>;
-
 export const MeetingPlatformSchema = z.enum(['zoom', 'google_meet', 'teams', 'unknown']);
 export type MeetingPlatform = z.infer<typeof MeetingPlatformSchema>;
 
-/** Normalised lifecycle of an external meeting bot; provider-specific codes are mapped onto this. */
+/** Normalised lifecycle of the meeting bot; provider-specific codes are mapped onto this. */
 export const BotStatusSchema = z.enum(['created', 'joining', 'waiting_room', 'in_call', 'recording', 'ended', 'failed']);
 export type BotStatus = z.infer<typeof BotStatusSchema>;
 
 // ---------------------------------------------------------------------------
-// Application events (custom names; not native LiveKit events)
+// Application events, pushed to the companion panel over the WebSocket
 // ---------------------------------------------------------------------------
 
 const base = z.object({
@@ -156,7 +152,6 @@ export const MeetingEventSchema = z.discriminatedUnion('event', [
     event: z.literal('agent.status'),
     status: AgentStatusSchema,
     detail: z.string().optional(),
-    /** Set only for meetings driven by an external meeting bot. */
     botStatus: BotStatusSchema.optional(),
   }),
   base.extend({ event: z.literal('transcript.partial'), segment: TranscriptSegmentSchema }),

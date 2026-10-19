@@ -31,17 +31,12 @@ describe('MeetingEventSchema', () => {
   });
 });
 
+const summary = { meetingId: 'm-1', title: 't', projectId: 'default', status: 'live', createdAt: base.timestamp };
+
 describe('MeetingSummarySchema', () => {
-  const summary = { meetingId: 'm-1', title: 't', projectId: 'default', roomName: 'meeting-m-1', status: 'live', createdAt: base.timestamp };
-
-  it('defaults the source to livekit for payloads without it', () => {
-    expect(MeetingSummarySchema.parse(summary).source).toBe('livekit');
-  });
-
-  it('carries the external meeting fields for bot-driven meetings', () => {
+  it('carries the meeting link and bot state', () => {
     const parsed = MeetingSummarySchema.parse({
       ...summary,
-      source: 'recall',
       platform: 'google_meet',
       meetingUrl: 'https://meet.google.com/abc-defg-hij',
       botStatus: 'waiting_room',
@@ -50,19 +45,18 @@ describe('MeetingSummarySchema', () => {
     expect(parsed.botStatus).toBe('waiting_room');
   });
 
-  it('requires meetingUrl to be a URL when creating a meeting', () => {
+  it('requires a meeting link when creating a meeting', () => {
+    expect(CreateMeetingRequestSchema.safeParse({ title: 't' }).success).toBe(false);
     expect(CreateMeetingRequestSchema.safeParse({ title: 't', meetingUrl: 'not a url' }).success).toBe(false);
     expect(CreateMeetingRequestSchema.safeParse({ title: 't', meetingUrl: 'https://zoom.us/j/123' }).success).toBe(true);
   });
 });
 
 describe('JoinMeetingResponseSchema', () => {
-  it('requires the LiveKit connection details', () => {
+  it('returns the session token for the companion panel', () => {
     const result = JoinMeetingResponseSchema.safeParse({
-      meeting: { meetingId: 'm-1', title: 't', projectId: 'default', roomName: 'meeting-m-1', status: 'live', createdAt: base.timestamp },
+      meeting: summary,
       participant: { identity: 'alice-1', name: 'Alice', isAgent: false },
-      livekitUrl: 'wss://x.livekit.cloud',
-      livekitToken: 'jwt',
       sessionToken: 'abc',
       briefingPending: false,
     });

@@ -8,10 +8,8 @@ const meeting: MeetingSummary = {
   meetingId: 'm-1',
   title: 'Sync',
   projectId: 'default',
-  roomName: 'meeting-m-1',
   status: 'live',
   createdAt: '2026-10-19T10:00:00.000Z',
-  source: 'recall',
   platform: 'google_meet',
   meetingUrl: 'https://meet.google.com/abc-defg-hij',
 };
@@ -91,15 +89,15 @@ describe('pairUtterance', () => {
 describe('BotMeetingManager', () => {
   it('rejects unsupported links before creating anything', async () => {
     const { manager, meetings } = makeManager();
-    await expect(manager.createExternalMeeting({ title: 't', meetingUrl: 'https://teams.microsoft.com/l/meetup-join/x' })).rejects.toThrow(/Zoom and Google Meet/);
+    await expect(manager.createMeeting({ title: 't', meetingUrl: 'https://teams.microsoft.com/l/meetup-join/x' })).rejects.toThrow(/Zoom and Google Meet/);
     expect(meetings.createMeeting).not.toHaveBeenCalled();
   });
 
   it('creates the meeting, sends the bot and records its id', async () => {
     const provider = makeProvider();
     const { manager, meetings } = makeManager({ provider });
-    const created = await manager.createExternalMeeting({ title: 't', projectId: 'p', meetingUrl: meeting.meetingUrl! });
-    expect(meetings.createMeeting).toHaveBeenCalledWith({ title: 't', projectId: 'p', source: 'recall', platform: 'google_meet', meetingUrl: meeting.meetingUrl });
+    const created = await manager.createMeeting({ title: 't', projectId: 'p', meetingUrl: meeting.meetingUrl! });
+    expect(meetings.createMeeting).toHaveBeenCalledWith({ title: 't', projectId: 'p', platform: 'google_meet', meetingUrl: meeting.meetingUrl });
     expect(provider.createBot).toHaveBeenCalledWith(expect.objectContaining({ botName: 'Meeting Copilot', metadata: { meetingId: 'm-1' } }));
     expect(meetings.updateBot).toHaveBeenCalledWith('m-1', { botId: 'bot-1', botStatus: 'created' });
     expect(meetings.setAgentStatus).toHaveBeenCalledWith('m-1', 'connecting', expect.any(String), 'created');
@@ -109,7 +107,7 @@ describe('BotMeetingManager', () => {
   it('ends the meeting again when the provider refuses the bot', async () => {
     const provider = makeProvider({ createBot: vi.fn(async () => Promise.reject(new Error('recall down'))) });
     const { manager, meetings } = makeManager({ provider });
-    await expect(manager.createExternalMeeting({ title: 't', meetingUrl: meeting.meetingUrl! })).rejects.toThrow('recall down');
+    await expect(manager.createMeeting({ title: 't', meetingUrl: meeting.meetingUrl! })).rejects.toThrow('recall down');
     expect(meetings.endMeeting).toHaveBeenCalledWith('m-1');
   });
 

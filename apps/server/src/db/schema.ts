@@ -1,4 +1,4 @@
-import type { Answer, BotStatus, MeetingPlatform, MeetingSource, MeetingState } from '@copilot/shared';
+import type { Answer, BotStatus, MeetingPlatform, MeetingState } from '@copilot/shared';
 import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
@@ -7,12 +7,9 @@ export const meetings = pgTable('meetings', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),
   projectId: text('project_id').notNull(),
-  roomName: text('room_name').notNull().unique(),
   status: text('status').$type<'scheduled' | 'live' | 'ended'>().notNull().default('live'),
   createdAt: ts('created_at').notNull().defaultNow(),
   endedAt: ts('ended_at'),
-  /** 'livekit' for our own rooms; 'recall' when a meeting bot sits in an external Zoom / Google Meet call. */
-  source: text('source').$type<MeetingSource>().notNull().default('livekit'),
   platform: text('platform').$type<MeetingPlatform>(),
   meetingUrl: text('meeting_url'),
   botId: text('bot_id'),
@@ -92,11 +89,9 @@ CREATE TABLE IF NOT EXISTS meetings (
   id text PRIMARY KEY,
   title text NOT NULL,
   project_id text NOT NULL,
-  room_name text NOT NULL UNIQUE,
   status text NOT NULL DEFAULT 'live',
   created_at timestamptz NOT NULL DEFAULT now(),
   ended_at timestamptz,
-  source text NOT NULL DEFAULT 'livekit',
   platform text,
   meeting_url text,
   bot_id text,
@@ -152,12 +147,15 @@ CREATE TABLE IF NOT EXISTS briefings (
   generated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (meeting_id, state_version)
 );
--- Columns added after the first release; keeps existing data directories working without migrations.
-ALTER TABLE meetings ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'livekit';
+-- Upgrades for data directories created by earlier releases (no migration tool: every statement is idempotent).
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS platform text;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS meeting_url text;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS bot_id text;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS bot_status text;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS bot_updated_at timestamptz;
 CREATE INDEX IF NOT EXISTS meetings_bot_id_idx ON meetings(bot_id);
+-- LiveKit rooms were removed: their meetings can no longer receive audio, and their room/source columns are unused.
+UPDATE meetings SET status = 'ended', ended_at = COALESCE(ended_at, now()) WHERE bot_id IS NULL AND status <> 'ended';
+ALTER TABLE meetings DROP COLUMN IF EXISTS room_name;
+ALTER TABLE meetings DROP COLUMN IF EXISTS source;
 `;

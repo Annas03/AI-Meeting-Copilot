@@ -19,17 +19,17 @@ const MESSAGES: Record<BotStatus, string> = {
   waiting_room: 'Admit the copilot bot from the meeting lobby to start transcription',
   in_call: 'The copilot bot is in the meeting, waiting for recording to start…',
   recording: 'Listening to the meeting',
-  ended: 'The copilot bot has left this meeting',
+  ended: 'The meeting has ended and the copilot bot has left',
   failed: 'The copilot bot could not join the meeting',
 };
 
-/** Shown above the tabs for external meetings: where the bot is in its lifecycle, and a way to pull it out. */
+/** Shown above the tabs: where the bot is in its lifecycle, and a way to pull it out of the call. */
 export function BotStatusBar({ meeting, session, botStatus, detail }: Props) {
   const [busy, setBusy] = useState(false);
   const [ended, setEnded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const status = botStatus ?? 'created';
+  const status = botStatus ?? (meeting.status === 'ended' ? 'ended' : 'created');
   const finished = ended || status === 'ended' || status === 'failed';
   const tone = status === 'waiting_room' ? 'waiting' : status === 'failed' ? 'failed' : status === 'recording' ? 'live' : '';
   const message = detail ?? MESSAGES[status];

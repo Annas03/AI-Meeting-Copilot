@@ -2,7 +2,7 @@
   "name": "meeting-copilot",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Engineering Meeting Copilot - LiveKit meeting with an AI participant that answers engineering questions from a pre-indexed codebase",
+  "description": "AI Engineering Meeting Copilot - a bot in your Zoom / Google Meet call that answers engineering questions from a pre-indexed codebase",
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -16,7 +16,6 @@
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "dev:server": "npm run dev -w @copilot/server",
-    "dev:agent": "npm run dev -w @copilot/agent",
     "dev:web": "npm run dev -w @copilot/web",
     "index": "npm run index -w @copilot/knowledge --",
     "search": "npm run search -w @copilot/knowledge --",

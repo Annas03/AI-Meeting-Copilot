@@ -1,17 +1,6 @@
-import { timingSafeEqual } from 'node:crypto';
-import {
-  AskRequestSchema,
-  CreateMeetingRequestSchema,
-  DevTranscriptRequestSchema,
-  INTERNAL_SECRET_HEADER,
-  InternalAgentStatusRequestSchema,
-  InternalTranscriptRequestSchema,
-  JoinMeetingRequestSchema,
-  SESSION_HEADER,
-} from '@copilot/shared';
+import { AskRequestSchema, CreateMeetingRequestSchema, DevTranscriptRequestSchema, JoinMeetingRequestSchema, SESSION_HEADER } from '@copilot/shared';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { WebhookReceiver } from 'livekit-server-sdk';
 import { nanoid } from 'nanoid';
 import type { ZodType } from 'zod';
 import type { BotMeetingManager } from '../bots/manager.js';
@@ -21,7 +10,6 @@ import type { Knowledge } from '@copilot/knowledge';
 import type { BriefingService } from '../copilot/briefing.js';
 import type { InvestigationManager } from '../copilot/investigations.js';
 import type { MeetingMemory } from '../copilot/memory.js';
-import { meetingIdFromRoom } from '../livekit/tokens.js';
 import type { Logger } from '../logger.js';
 import { MeetingService, NotFoundError, slug, type Session } from '../meetings/service.js';
 
@@ -31,7 +19,7 @@ export interface AppDeps {
   memory: MeetingMemory;
   briefings: BriefingService;
   knowledge: Knowledge;
-  /** Present only when Recall.ai is configured. */
+  /** Present only when Recall.ai is configured; without it meetings cannot be created. */
   bots?: BotMeetingManager;
   logger: Logger;
   version: string;
@@ -55,34 +43,11 @@ function param(req: Request, name: string): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
-function secretsMatch(provided: string | undefined, expected: string): boolean {
-  if (!provided) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 export function createApp(deps: AppDeps): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(cors({ origin: config.WEB_ORIGIN ?? true }));
-
-  // LiveKit webhooks need the raw body for signature verification.
-  app.post('/api/livekit/webhook', express.raw({ type: 'application/webhook+json' }), async (req, res) => {
-    if (!config.LIVEKIT_API_KEY || !config.LIVEKIT_API_SECRET) throw new HttpError(503, 'LiveKit not configured');
-    const receiver = new WebhookReceiver(config.LIVEKIT_API_KEY, config.LIVEKIT_API_SECRET);
-    const event = await receiver.receive((req.body as Buffer).toString('utf8'), req.header('authorization'));
-    const roomName = event.room?.name;
-    const meetingId = roomName ? meetingIdFromRoom(roomName) : null;
-    if (meetingId) {
-      if (event.event === 'participant_left' && event.participant) {
-        await deps.meetings.participantLeft(meetingId, event.participant.identity, event.participant.name);
-      } else if (event.event === 'room_finished') {
-        await deps.meetings.endMeeting(meetingId);
-      }
-    }
-    res.json({ ok: true });
-  });
 
   // Recall.ai webhooks (bot status from the dashboard, real-time transcript from the bot) are verified on the raw body.
   app.post('/api/recall/webhook', express.raw({ type: 'application/json', limit: '2mb' }), (req, res) => {
@@ -111,10 +76,6 @@ export function createApp(deps: AppDeps): express.Express {
     next();
   };
 
-  const requireInternal = (req: Request, _res: Response, next: NextFunction) => {
-    if (!secretsMatch(req.header(INTERNAL_SECRET_HEADER), config.INTERNAL_API_SECRET)) return next(new HttpError(401, 'Invalid internal secret'));
-    next();
-  };
 
   app.get('/api/health', async (_req, res) => {
     const health = await deps.knowledge.health();
@@ -122,7 +83,6 @@ export function createApp(deps: AppDeps): express.Express {
       ok: true,
       version: deps.version,
       qdrant: health.qdrant ? 'ok' : 'unavailable',
-      livekit: config.livekitConfigured ? 'configured' : 'missing',
       anthropic: config.anthropicConfigured ? 'configured' : 'missing',
       recall: config.recallConfigured ? 'configured' : 'missing',
       embeddings: health.embeddings,
@@ -144,14 +104,9 @@ export function createApp(deps: AppDeps): express.Express {
   });
 
   app.post('/api/meetings', async (req, res) => {
-    const { meetingUrl, ...body } = parseBody(CreateMeetingRequestSchema, req.body);
-    if (meetingUrl) {
-      if (!deps.bots) throw new HttpError(400, 'Attaching to Zoom / Google Meet requires RECALL_API_KEY and PUBLIC_SERVER_URL on the server');
-      res.status(201).json(await deps.bots.createExternalMeeting({ ...body, meetingUrl }));
-      return;
-    }
-    const meeting = await deps.meetings.createMeeting(body);
-    res.status(201).json(meeting);
+    const body = parseBody(CreateMeetingRequestSchema, req.body);
+    if (!deps.bots) throw new HttpError(503, 'Meetings need a meeting bot: set RECALL_API_KEY and PUBLIC_SERVER_URL on the server');
+    res.status(201).json(await deps.bots.createMeeting(body));
   });
 
   app.get('/api/meetings/:id', async (req, res) => {
@@ -189,8 +144,7 @@ export function createApp(deps: AppDeps): express.Express {
 
   app.post('/api/meetings/:id/end', requireSession, async (req, res) => {
     const meetingId = param(req, 'id');
-    const meeting = await deps.meetings.getMeeting(meetingId);
-    if (meeting.source === 'recall' && deps.bots) await deps.bots.end(meetingId);
+    if (deps.bots) await deps.bots.end(meetingId);
     else await deps.meetings.endMeeting(meetingId);
     res.json({ ok: true });
   });
@@ -201,41 +155,11 @@ export function createApp(deps: AppDeps): express.Express {
     res.json({ ok: true });
   });
 
-  // ---- internal API used by the agent ----
-  app.post('/api/internal/transcript', requireInternal, async (req, res) => {
-    const body = parseBody(InternalTranscriptRequestSchema, req.body);
-    const segment = await deps.meetings.ingestSegment(body.segment);
-    res.json({ ok: true, sequence: segment.sequence ?? null });
-  });
-
-  app.post('/api/internal/agent-status', requireInternal, async (req, res) => {
-    const body = parseBody(InternalAgentStatusRequestSchema, req.body);
-    deps.meetings.setAgentStatus(body.meetingId, body.status, body.detail);
-    res.json({ ok: true });
-  });
-
-  app.get('/api/internal/rooms/:roomName', requireInternal, async (req, res) => {
-    const meeting = await deps.meetings.getMeetingByRoom(param(req, 'roomName'));
-    if (!meeting) throw new HttpError(404, 'Unknown room');
-    res.json(meeting);
-  });
-
-  app.post('/api/internal/participant-left', requireInternal, async (req, res) => {
-    const { meetingId, identity, name } = req.body as { meetingId?: string; identity?: string; name?: string };
-    if (!meetingId || !identity) throw new HttpError(400, 'meetingId and identity are required');
-    await deps.meetings.participantLeft(meetingId, identity, name);
-    res.json({ ok: true });
-  });
-
-  // ---- dev helpers (disabled in production): inject transcript lines without audio ----
+  // ---- dev helpers (disabled in production): inject transcript lines into a meeting without a live call ----
   if (config.devRoutes) {
-    app.post('/api/dev/meetings/:id/transcript', async (req, res, next) => {
+    app.post('/api/dev/meetings/:id/transcript', requireSession, async (req, res) => {
       const meetingId = param(req, 'id');
-      const internalOk = secretsMatch(req.header(INTERNAL_SECRET_HEADER), config.INTERNAL_API_SECRET);
-      const session = internalOk ? null : await deps.meetings.resolveSession(req.header(SESSION_HEADER));
-      if (!internalOk && (!session || session.meetingId !== meetingId)) return next(new HttpError(401, 'Provide the internal secret or a session token'));
       const body = parseBody(DevTranscriptRequestSchema, req.body);
-      await deps.meetings.getMeeting(meetingId);
       const segment = await deps.meetings.ingestSegment({
         segmentId: `dev-${nanoid(8)}`,
         meetingId,

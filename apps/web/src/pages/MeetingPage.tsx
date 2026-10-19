@@ -1,4 +1,3 @@
-import { LiveKitRoom, PreJoin, RoomAudioRenderer, VideoConference, type LocalUserChoices } from '@livekit/components-react';
 import type { JoinMeetingResponse, MeetingSummary } from '@copilot/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
@@ -10,35 +9,18 @@ interface Props {
   meetingId: string;
 }
 
+/** The call itself runs in Zoom / Google Meet; this page is the companion panel people keep open next to it. */
 export function MeetingPage({ meetingId }: Props) {
   const [meeting, setMeeting] = useState<MeetingSummary | null>(null);
-  const [livekitAvailable, setLivekitAvailable] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [choices, setChoices] = useState<LocalUserChoices | null>(null);
   const [join, setJoin] = useState<JoinMeetingResponse | null>(null);
-  const [joinError, setJoinError] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .getMeeting(meetingId)
       .then(setMeeting)
       .catch((e: Error) => setLoadError(e.message));
-    api
-      .health()
-      .then((h) => setLivekitAvailable(h.livekit === 'configured'))
-      .catch(() => setLivekitAvailable(false));
   }, [meetingId]);
-
-  async function doJoin(values: LocalUserChoices) {
-    setJoinError(null);
-    try {
-      const res = await api.joinMeeting(meetingId, { name: values.username });
-      setChoices(values);
-      setJoin(res);
-    } catch (err) {
-      setJoinError((err as Error).message);
-    }
-  }
 
   if (loadError) {
     return (
@@ -49,53 +31,30 @@ export function MeetingPage({ meetingId }: Props) {
     );
   }
 
-  if (!meeting || livekitAvailable === null) return <main className="centered muted">Loading meeting...</main>;
+  if (!meeting) return <main className="centered muted">Loading meeting...</main>;
 
-  // External meetings (a bot inside Zoom / Google Meet) never use LiveKit in the browser: this page is only the companion panel.
-  const external = meeting.source === 'recall';
-
-  if (!join || !choices) {
+  if (!join) {
     return (
       <main className="prejoin">
         <header className="prejoin-header">
           <h1>{meeting.title}</h1>
           <p className="muted small">
-            project <code>{meeting.projectId}</code> ·{' '}
-            {external ? (
+            project <code>{meeting.projectId}</code> · {platformLabel(meeting.platform)}
+            {meeting.meetingUrl && (
               <>
-                {platformLabel(meeting.platform)}
-                {meeting.meetingUrl && (
-                  <>
-                    {' '}
-                    <a href={meeting.meetingUrl} target="_blank" rel="noreferrer">
-                      open meeting
-                    </a>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                room <code>{meeting.roomName}</code>
+                {' '}
+                <a href={meeting.meetingUrl} target="_blank" rel="noreferrer">
+                  open meeting
+                </a>
               </>
             )}{' '}
             · share link <code>{window.location.href}</code>
           </p>
         </header>
-        {livekitAvailable && !external ? (
-          <PreJoin
-            defaults={{ username: '', audioEnabled: true, videoEnabled: false }}
-            onSubmit={doJoin}
-            onError={(e) => setJoinError(e.message)}
-            joinLabel="Join meeting"
-          />
-        ) : (
-          <TextOnlyJoin onSubmit={doJoin} external={external} platform={platformLabel(meeting.platform)} />
-        )}
-        {joinError && <p className="error">{joinError}</p>}
+        <JoinForm meetingId={meetingId} platform={platformLabel(meeting.platform)} onJoined={setJoin} />
         <p className="muted small notice">
-          {external
-            ? 'The AI copilot joins the call as a visible bot participant that transcribes and analyses the conversation. Let the other participants know.'
-            : 'The AI copilot transcribes and analyses this meeting. Participants are informed by this notice.'}
+          The AI copilot joins the call as a visible bot participant that transcribes and analyses the conversation. Let
+          the other participants know.
         </p>
       </main>
     );
@@ -108,77 +67,27 @@ export function MeetingPage({ meetingId }: Props) {
     participantName: join.participant.name,
   };
 
-  if (external) {
-    return (
-      <div className="meeting-layout companion">
-        <CopilotPanel session={session} meeting={join.meeting} />
-      </div>
-    );
-  }
-
-  if (!join.livekitUrl || !join.livekitToken) {
-    return (
-      <div className="meeting-layout">
-        <div className="meeting-video centered">
-          <div className="muted">
-            <p>
-              <strong>Text-only mode.</strong> LiveKit is not configured on the server, so there is no audio or video.
-            </p>
-            <p className="small">
-              Type questions in the panel, or inject transcript lines with the dev endpoint. Set LIVEKIT_* in .env to
-              enable the real meeting.
-            </p>
-          </div>
-        </div>
-        <CopilotPanel session={session} meeting={join.meeting} />
-      </div>
-    );
-  }
-
   return (
-    <LiveKitRoom
-      serverUrl={join.livekitUrl}
-      token={join.livekitToken}
-      connect
-      audio={choices.audioEnabled}
-      video={choices.videoEnabled}
-      options={{
-        audioCaptureDefaults: choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : undefined,
-        videoCaptureDefaults: choices.videoDeviceId ? { deviceId: choices.videoDeviceId } : undefined,
-      }}
-      onDisconnected={() => {
-        setJoin(null);
-        setChoices(null);
-      }}
-      className="meeting-layout"
-    >
-      <div className="meeting-video">
-        <VideoConference />
-      </div>
+    <div className="meeting-layout">
       <CopilotPanel session={session} meeting={join.meeting} />
-      <RoomAudioRenderer />
-    </LiveKitRoom>
+    </div>
   );
 }
 
-function TextOnlyJoin({
-  onSubmit,
-  external = false,
-  platform,
-}: {
-  onSubmit: (values: LocalUserChoices) => Promise<void>;
-  external?: boolean;
-  platform?: string;
-}) {
+function JoinForm({ meetingId, platform, onJoined }: { meetingId: string; platform: string; onJoined: (join: JoinMeetingResponse) => void }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
+    setError(null);
     try {
-      await onSubmit({ username: name.trim(), audioEnabled: false, videoEnabled: false, audioDeviceId: '', videoDeviceId: '' });
+      onJoined(await api.joinMeeting(meetingId, { name: name.trim() }));
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setBusy(false);
     }
@@ -187,17 +96,17 @@ function TextOnlyJoin({
   return (
     <form onSubmit={submit} className="stack home-card">
       <p className="muted small">
-        {external
-          ? `This is the companion panel for a ${platform ?? 'external'} meeting: keep it open next to the call to follow the transcript and answers.`
-          : 'LiveKit is not configured on the server, so this meeting runs in text-only mode.'}
+        This is the companion panel for a {platform} meeting: keep it open next to the call to follow the transcript and
+        answers.
       </p>
       <label>
         Your name
         <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} autoFocus />
       </label>
       <button type="submit" disabled={busy || !name.trim()}>
-        {busy ? 'Joining...' : external ? 'Open companion panel' : 'Join (text only)'}
+        {busy ? 'Opening...' : 'Open companion panel'}
       </button>
+      {error && <p className="error">{error}</p>}
     </form>
   );
 }

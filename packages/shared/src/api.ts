@@ -1,11 +1,9 @@
 import { z } from 'zod';
 import {
-  AgentStatusSchema,
   AnswerSchema,
   BotStatusSchema,
   BriefingSchema,
   MeetingPlatformSchema,
-  MeetingSourceSchema,
   MeetingStateSchema,
   ParticipantSchema,
   TranscriptSegmentSchema,
@@ -19,8 +17,8 @@ export const CreateMeetingRequestSchema = z.object({
   title: z.string().min(1).max(200),
   /** Knowledge project (index) this meeting may query. Defaults to the server's DEFAULT_PROJECT_ID. */
   projectId: z.string().min(1).max(100).optional(),
-  /** Zoom / Google Meet link. When present a meeting bot joins that meeting instead of a LiveKit room being used. */
-  meetingUrl: z.string().url().max(2000).optional(),
+  /** Zoom / Google Meet link the copilot bot joins. */
+  meetingUrl: z.string().url().max(2000),
 });
 export type CreateMeetingRequest = z.infer<typeof CreateMeetingRequestSchema>;
 
@@ -28,14 +26,12 @@ export const MeetingSummarySchema = z.object({
   meetingId: z.string(),
   title: z.string(),
   projectId: z.string(),
-  roomName: z.string(),
   status: z.enum(['scheduled', 'live', 'ended']),
   createdAt: z.string(),
-  source: MeetingSourceSchema.default('livekit'),
-  /** Set for external meetings (source !== 'livekit'). */
+  /** Absent only on meetings created before the bot integration. */
   platform: MeetingPlatformSchema.optional(),
   meetingUrl: z.string().optional(),
-  /** Last known lifecycle state of the meeting bot, for external meetings. */
+  /** Last known lifecycle state of the meeting bot. */
   botStatus: BotStatusSchema.optional(),
 });
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
@@ -48,10 +44,6 @@ export type JoinMeetingRequest = z.infer<typeof JoinMeetingRequestSchema>;
 export const JoinMeetingResponseSchema = z.object({
   meeting: MeetingSummarySchema,
   participant: ParticipantSchema,
-  /** LiveKit server URL the browser connects to. */
-  livekitUrl: z.string(),
-  /** LiveKit access token for this participant. */
-  livekitToken: z.string(),
   /** Opaque token for REST + WebSocket calls to this server. */
   sessionToken: z.string(),
   /** Whether the late-joiner briefing will be pushed over the WebSocket. */
@@ -89,31 +81,13 @@ export const HealthResponseSchema = z.object({
   ok: z.boolean(),
   version: z.string(),
   qdrant: z.enum(['ok', 'unavailable']),
-  livekit: z.enum(['configured', 'missing']),
   anthropic: z.enum(['configured', 'missing']),
-  /** Whether the server can attach a meeting bot to Zoom / Google Meet links. */
+  /** Whether the server can send meeting bots; meetings cannot be created without it. */
   recall: z.enum(['configured', 'missing']),
   embeddings: z.string(),
 });
 
 export const OkResponseSchema = z.object({ ok: z.literal(true) });
-
-// ---------------------------------------------------------------------------
-// Internal API (agent -> server, authenticated with INTERNAL_API_SECRET)
-// ---------------------------------------------------------------------------
-
-export const InternalTranscriptRequestSchema = z.object({
-  segment: TranscriptSegmentSchema,
-});
-export type InternalTranscriptRequest = z.infer<typeof InternalTranscriptRequestSchema>;
-
-export const InternalAgentStatusRequestSchema = z.object({
-  meetingId: z.string(),
-  roomName: z.string(),
-  status: AgentStatusSchema,
-  detail: z.string().optional(),
-});
-export type InternalAgentStatusRequest = z.infer<typeof InternalAgentStatusRequestSchema>;
 
 /** Dev-only helper used by automated tests to inject transcript lines without audio. */
 export const DevTranscriptRequestSchema = z.object({

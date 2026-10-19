@@ -6,7 +6,7 @@ export function HomePage() {
   const [title, setTitle] = useState('Engineering sync');
   const [projectId, setProjectId] = useState('');
   const [meetingUrl, setMeetingUrl] = useState('');
-  const [recallAvailable, setRecallAvailable] = useState(false);
+  const [botsAvailable, setBotsAvailable] = useState<boolean | null>(null);
   const [joinId, setJoinId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -16,12 +16,13 @@ export function HomePage() {
     api
       .health()
       .then((h) => {
-        setRecallAvailable(h.recall === 'configured');
-        setHealth(
-          `server ok · qdrant ${h.qdrant} · livekit ${h.livekit} · anthropic ${h.anthropic} · recall ${h.recall} · embeddings ${h.embeddings}`,
-        );
+        setBotsAvailable(h.recall === 'configured');
+        setHealth(`server ok · qdrant ${h.qdrant} · anthropic ${h.anthropic} · recall ${h.recall} · embeddings ${h.embeddings}`);
       })
-      .catch((e: Error) => setHealth(`server unreachable: ${e.message}`));
+      .catch((e: Error) => {
+        setBotsAvailable(false);
+        setHealth(`server unreachable: ${e.message}`);
+      });
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -31,8 +32,8 @@ export function HomePage() {
     try {
       const meeting = await api.createMeeting({
         title,
+        meetingUrl: meetingUrl.trim(),
         ...(projectId.trim() ? { projectId: projectId.trim() } : {}),
-        ...(meetingUrl.trim() ? { meetingUrl: meetingUrl.trim() } : {}),
       });
       navigate(`/m/${meeting.meetingId}`);
     } catch (err) {
@@ -53,11 +54,22 @@ export function HomePage() {
       <section className="home-card">
         <h1>Meeting Copilot</h1>
         <p className="muted">
-          Start a meeting with an AI participant that listens for engineering questions and answers them with
-          evidence from your indexed codebase{recallAvailable ? ', or attach it to an existing Zoom / Google Meet call' : ''}.
+          Send an AI participant into your Zoom or Google Meet call. It listens for engineering questions and answers
+          them here with evidence from your indexed codebase.
         </p>
 
         <form onSubmit={onCreate} className="stack">
+          <label>
+            Zoom / Google Meet link
+            <input
+              value={meetingUrl}
+              onChange={(e) => setMeetingUrl(e.target.value)}
+              placeholder="https://meet.google.com/abc-defg-hij"
+              type="url"
+              required
+            />
+            <span className="small">The copilot bot asks to join; admit it from the meeting lobby.</span>
+          </label>
           <label>
             Meeting title
             <input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} />
@@ -66,25 +78,21 @@ export function HomePage() {
             Knowledge project (index name, optional)
             <input value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="default" />
           </label>
-          {recallAvailable && (
-            <label>
-              Zoom / Google Meet link (optional)
-              <input value={meetingUrl} onChange={(e) => setMeetingUrl(e.target.value)} placeholder="https://meet.google.com/abc-defg-hij" />
-              <span className="small">The copilot bot joins that meeting instead of a LiveKit room; admit it from the lobby.</span>
-            </label>
-          )}
-          <button type="submit" disabled={busy}>
-            {busy ? 'Creating...' : meetingUrl.trim() ? 'Create and send the bot' : 'Create meeting'}
+          <button type="submit" disabled={busy || !botsAvailable}>
+            {busy ? 'Sending the bot...' : 'Send the copilot to this meeting'}
           </button>
+          {botsAvailable === false && (
+            <p className="muted small">Set RECALL_API_KEY and PUBLIC_SERVER_URL on the server to create meetings.</p>
+          )}
         </form>
 
         <form onSubmit={onJoin} className="stack">
           <label>
-            Join an existing meeting
+            Open an existing meeting
             <input value={joinId} onChange={(e) => setJoinId(e.target.value)} placeholder="meeting id or link" />
           </label>
           <button type="submit" className="secondary">
-            Join
+            Open
           </button>
         </form>
 

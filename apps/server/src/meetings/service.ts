@@ -5,7 +5,6 @@ import type {
   BotStatus,
   JoinMeetingResponse,
   MeetingPlatform,
-  MeetingSource,
   MeetingSummary,
   Participant,
   TranscriptSegment,
@@ -21,7 +20,6 @@ import type { MeetingMemory } from '../copilot/memory.js';
 import type { Database } from '../db/index.js';
 import { meetings, participants, transcriptSegments } from '../db/schema.js';
 import type { EventHub } from '../events/hub.js';
-import { createParticipantToken, roomNameFor } from '../livekit/tokens.js';
 import type { Logger } from '../logger.js';
 
 export interface Session {
@@ -59,29 +57,20 @@ export class MeetingService {
 
   constructor(private readonly deps: MeetingServiceDeps) {}
 
-  async createMeeting(input: {
-    title: string;
-    projectId?: string;
-    source?: MeetingSource;
-    platform?: MeetingPlatform;
-    meetingUrl?: string;
-  }): Promise<MeetingSummary> {
+  async createMeeting(input: { title: string; projectId?: string; platform: MeetingPlatform; meetingUrl: string }): Promise<MeetingSummary> {
     const id = nanoid(10);
-    // Every meeting keeps a room name: LiveKit meetings use it, external ones never create the room.
     const row = {
       id,
       title: input.title,
       projectId: input.projectId ?? config.DEFAULT_PROJECT_ID,
-      roomName: roomNameFor(id),
       status: 'live' as const,
       createdAt: new Date().toISOString(),
-      source: input.source ?? ('livekit' as const),
-      platform: input.platform ?? null,
-      meetingUrl: input.meetingUrl ?? null,
+      platform: input.platform,
+      meetingUrl: input.meetingUrl,
     };
     await this.deps.db.insert(meetings).values(row);
     this.deps.hub.emit(id, 'meeting.started', { title: input.title });
-    this.deps.logger.info({ meetingId: id, projectId: row.projectId, source: row.source }, 'meeting created');
+    this.deps.logger.info({ meetingId: id, projectId: row.projectId, platform: row.platform }, 'meeting created');
     return this.toSummary({ ...row, endedAt: null, botId: null, botStatus: null, botUpdatedAt: null });
   }
 
@@ -92,16 +81,7 @@ export class MeetingService {
     return this.toSummary(row);
   }
 
-  async getMeetingByRoom(roomName: string): Promise<MeetingSummary | null> {
-    const rows = await this.deps.db.select().from(meetings).where(eq(meetings.roomName, roomName)).limit(1);
-    return rows[0] ? this.toSummary(rows[0]) : null;
-  }
-
-  /**
-   * Registers a participant and mints their LiveKit token. Without LiveKit credentials the join
-   * still succeeds in text-only mode (empty livekitUrl/token) so the copilot panel can be used
-   * with typed questions and the dev transcript injector.
-   */
+  /** Registers someone opening the companion panel; the session token authenticates their REST and WebSocket calls. */
   async join(meetingId: string, name: string): Promise<JoinMeetingResponse> {
     const meeting = await this.getMeeting(meetingId);
     const identity = `${slug(name)}-${nanoid(6)}`;
@@ -110,18 +90,14 @@ export class MeetingService {
 
     await this.deps.db.insert(participants).values({ identity, meetingId, name, isAgent: false, sessionToken, joinedAt: new Date().toISOString() });
     this.sessions.set(sessionToken, { token: sessionToken, meetingId, identity, name });
-
-    // External meetings never get a LiveKit token: the browser only opens the companion panel.
-    const useLivekit = config.livekitConfigured && meeting.source === 'livekit';
-    const livekitToken = useLivekit ? await createParticipantToken({ roomName: meeting.roomName, identity, name }) : '';
     this.deps.hub.emit(meetingId, 'participant.joined', { participant });
 
     const state = await this.deps.memory.getState(meetingId);
     const briefingPending = state.version > 0;
     if (briefingPending) this.deps.briefings.deliverTo(meetingId, identity);
 
-    this.deps.logger.info({ meetingId, identity, textOnly: !useLivekit, source: meeting.source }, 'participant joined');
-    return { meeting, participant, livekitUrl: useLivekit ? config.LIVEKIT_URL! : '', livekitToken, sessionToken, briefingPending };
+    this.deps.logger.info({ meetingId, identity }, 'participant joined');
+    return { meeting, participant, sessionToken, briefingPending };
   }
 
   async participantLeft(meetingId: string, identity: string, name?: string): Promise<void> {
@@ -149,7 +125,7 @@ export class MeetingService {
   }
 
   /**
-   * Entry point for transcript segments from the agent (or the dev injector). Partials are only
+   * Entry point for transcript segments from the meeting bot (or the dev injector). Partials are only
    * broadcast; finals are persisted, broadcast, folded into memory and checked for questions.
    */
   async ingestSegment(segment: TranscriptSegment): Promise<TranscriptSegment> {
@@ -235,7 +211,7 @@ export class MeetingService {
     return { meetingTitle: meeting.title, projectId: meeting.projectId, ...(repository ? { repository } : {}), state, recentTranscript: recent };
   }
 
-  /** Idempotent: the LiveKit webhook, the meeting bot lifecycle and the user may all request it. */
+  /** Idempotent: the meeting bot lifecycle and the user may both request it. */
   async endMeeting(meetingId: string): Promise<void> {
     const updated = await this.deps.db
       .update(meetings)
@@ -290,10 +266,8 @@ export class MeetingService {
       meetingId: row.id,
       title: row.title,
       projectId: row.projectId,
-      roomName: row.roomName,
       status: row.status,
       createdAt: row.createdAt,
-      source: row.source,
       ...(row.platform ? { platform: row.platform } : {}),
       ...(row.meetingUrl ? { meetingUrl: row.meetingUrl } : {}),
       ...(row.botStatus ? { botStatus: row.botStatus } : {}),
