@@ -2,7 +2,10 @@ import { z } from 'zod';
 import {
   AgentStatusSchema,
   AnswerSchema,
+  BotStatusSchema,
   BriefingSchema,
+  MeetingPlatformSchema,
+  MeetingSourceSchema,
   MeetingStateSchema,
   ParticipantSchema,
   TranscriptSegmentSchema,
@@ -16,6 +19,8 @@ export const CreateMeetingRequestSchema = z.object({
   title: z.string().min(1).max(200),
   /** Knowledge project (index) this meeting may query. Defaults to the server's DEFAULT_PROJECT_ID. */
   projectId: z.string().min(1).max(100).optional(),
+  /** Zoom / Google Meet link. When present a meeting bot joins that meeting instead of a LiveKit room being used. */
+  meetingUrl: z.string().url().max(2000).optional(),
 });
 export type CreateMeetingRequest = z.infer<typeof CreateMeetingRequestSchema>;
 
@@ -26,6 +31,12 @@ export const MeetingSummarySchema = z.object({
   roomName: z.string(),
   status: z.enum(['scheduled', 'live', 'ended']),
   createdAt: z.string(),
+  source: MeetingSourceSchema.default('livekit'),
+  /** Set for external meetings (source !== 'livekit'). */
+  platform: MeetingPlatformSchema.optional(),
+  meetingUrl: z.string().optional(),
+  /** Last known lifecycle state of the meeting bot, for external meetings. */
+  botStatus: BotStatusSchema.optional(),
 });
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
 
@@ -80,8 +91,12 @@ export const HealthResponseSchema = z.object({
   qdrant: z.enum(['ok', 'unavailable']),
   livekit: z.enum(['configured', 'missing']),
   anthropic: z.enum(['configured', 'missing']),
+  /** Whether the server can attach a meeting bot to Zoom / Google Meet links. */
+  recall: z.enum(['configured', 'missing']),
   embeddings: z.string(),
 });
+
+export const OkResponseSchema = z.object({ ok: z.literal(true) });
 
 // ---------------------------------------------------------------------------
 // Internal API (agent -> server, authenticated with INTERNAL_API_SECRET)

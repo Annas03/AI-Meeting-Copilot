@@ -2,6 +2,7 @@ import type { MeetingSummary } from '@copilot/shared';
 import { useState } from 'react';
 import { useCopilot, type CopilotSession } from '../copilot/useCopilot';
 import { AskBox } from './AskBox';
+import { BotStatusBar } from './BotStatusBar';
 import { BriefingCard } from './BriefingCard';
 import { InvestigationCard } from './InvestigationCard';
 import { MemoryView } from './MemoryView';
@@ -19,9 +20,10 @@ export function CopilotPanel({ session, meeting }: Props) {
   const [tab, setTab] = useState<Tab>('copilot');
 
   const running = state.investigationOrder.filter((id) => state.investigations[id]?.status === 'running').length;
+  const external = meeting.source === 'recall';
 
   return (
-    <aside className="copilot-panel">
+    <aside className={`copilot-panel${external ? ' with-bot-bar' : ''}`}>
       <header className="panel-header">
         <div>
           <strong>Copilot</strong>
@@ -32,6 +34,8 @@ export function CopilotPanel({ session, meeting }: Props) {
           <StatusDot label={`events ${state.socket}`} tone={state.socket === 'open' ? 'ok' : 'warn'} />
         </div>
       </header>
+
+      {external && <BotStatusBar meeting={meeting} session={session} botStatus={state.botStatus ?? meeting.botStatus} detail={state.agentDetail} />}
 
       <nav className="tabs">
         <button className={tab === 'copilot' ? 'active' : ''} onClick={() => setTab('copilot')}>

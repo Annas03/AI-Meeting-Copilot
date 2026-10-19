@@ -14,6 +14,8 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { WebhookReceiver } from 'livekit-server-sdk';
 import { nanoid } from 'nanoid';
 import type { ZodType } from 'zod';
+import type { BotMeetingManager } from '../bots/manager.js';
+import { BotProviderError, UnsupportedMeetingUrlError } from '../bots/provider.js';
 import { config } from '../config.js';
 import type { Knowledge } from '@copilot/knowledge';
 import type { BriefingService } from '../copilot/briefing.js';
@@ -29,6 +31,8 @@ export interface AppDeps {
   memory: MeetingMemory;
   briefings: BriefingService;
   knowledge: Knowledge;
+  /** Present only when Recall.ai is configured. */
+  bots?: BotMeetingManager;
   logger: Logger;
   version: string;
 }
@@ -80,6 +84,22 @@ export function createApp(deps: AppDeps): express.Express {
     res.json({ ok: true });
   });
 
+  // Recall.ai webhooks (bot status from the dashboard, real-time transcript from the bot) are verified on the raw body.
+  app.post('/api/recall/webhook', express.raw({ type: 'application/json', limit: '2mb' }), (req, res) => {
+    if (!deps.bots) throw new HttpError(503, 'Recall.ai is not configured');
+    const body = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
+    const token = typeof req.query.token === 'string' ? req.query.token : undefined;
+    const verdict = deps.bots.verifyWebhook({
+      body,
+      ...(token ? { token } : {}),
+      headers: { id: req.header('svix-id'), timestamp: req.header('svix-timestamp'), signature: req.header('svix-signature') },
+    });
+    if (!verdict.ok) throw new HttpError(401, `Webhook rejected: ${verdict.reason}`);
+    // Acknowledge first: the provider retries anything that is not a fast 2xx.
+    res.json({ ok: true });
+    void deps.bots.handleWebhook(body, req.header('svix-id')).catch((err) => deps.logger.warn({ err }, 'recall webhook processing failed'));
+  });
+
   app.use(express.json({ limit: '1mb' }));
 
   const requireSession = async (req: Request, res: Response, next: NextFunction) => {
@@ -104,6 +124,7 @@ export function createApp(deps: AppDeps): express.Express {
       qdrant: health.qdrant ? 'ok' : 'unavailable',
       livekit: config.livekitConfigured ? 'configured' : 'missing',
       anthropic: config.anthropicConfigured ? 'configured' : 'missing',
+      recall: config.recallConfigured ? 'configured' : 'missing',
       embeddings: health.embeddings,
     });
   });
@@ -123,7 +144,12 @@ export function createApp(deps: AppDeps): express.Express {
   });
 
   app.post('/api/meetings', async (req, res) => {
-    const body = parseBody(CreateMeetingRequestSchema, req.body);
+    const { meetingUrl, ...body } = parseBody(CreateMeetingRequestSchema, req.body);
+    if (meetingUrl) {
+      if (!deps.bots) throw new HttpError(400, 'Attaching to Zoom / Google Meet requires RECALL_API_KEY and PUBLIC_SERVER_URL on the server');
+      res.status(201).json(await deps.bots.createExternalMeeting({ ...body, meetingUrl }));
+      return;
+    }
     const meeting = await deps.meetings.createMeeting(body);
     res.status(201).json(meeting);
   });
@@ -159,6 +185,14 @@ export function createApp(deps: AppDeps): express.Express {
     const briefing = await deps.briefings.getOrGenerate(param(req, 'id'));
     if (!briefing) throw new HttpError(404, 'No briefing yet: the meeting has no memory to summarise');
     res.json({ briefing });
+  });
+
+  app.post('/api/meetings/:id/end', requireSession, async (req, res) => {
+    const meetingId = param(req, 'id');
+    const meeting = await deps.meetings.getMeeting(meetingId);
+    if (meeting.source === 'recall' && deps.bots) await deps.bots.end(meetingId);
+    else await deps.meetings.endMeeting(meetingId);
+    res.json({ ok: true });
   });
 
   app.post('/api/meetings/:id/leave', requireSession, async (req, res) => {
@@ -228,6 +262,15 @@ export function createApp(deps: AppDeps): express.Express {
     }
     if (err instanceof NotFoundError) {
       res.status(404).json({ error: err.message });
+      return;
+    }
+    if (err instanceof UnsupportedMeetingUrlError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    if (err instanceof BotProviderError) {
+      deps.logger.warn({ err, path: req.path }, 'meeting bot provider request failed');
+      res.status(502).json({ error: `Recall.ai rejected the request: ${err.message}` });
       return;
     }
     const message = err instanceof Error ? err.message : 'Internal error';

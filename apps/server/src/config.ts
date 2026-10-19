@@ -4,6 +4,9 @@ import { z } from 'zod';
 
 const repoRoot = loadRootEnv();
 
+/** .env templates leave optional values empty; treat '' as unset so `.url()` / enum checks do not reject them. */
+const blankToUndefined = (value: unknown) => (value === '' ? undefined : value);
+
 const EnvSchema = z.object({
   NODE_ENV: z.string().default('development'),
   PORT: z.coerce.number().int().positive().default(8787),
@@ -30,6 +33,15 @@ const EnvSchema = z.object({
   MEMORY_BATCH_SEGMENTS: z.coerce.number().int().min(1).default(5),
   MEMORY_MAX_WAIT_MS: z.coerce.number().int().min(1000).default(45_000),
 
+  /** Recall.ai meeting bots (attach the copilot to Zoom / Google Meet). 'fake' selects the offline provider outside production. */
+  RECALL_API_KEY: z.string().optional(),
+  RECALL_REGION: z.preprocess(blankToUndefined, z.enum(['us-east-1', 'us-west-2', 'eu-central-1', 'ap-northeast-1']).default('us-east-1')),
+  /** Svix signing secret (whsec_...) from the Recall dashboard; unset = webhook signatures are not verified. */
+  RECALL_WEBHOOK_SECRET: z.string().optional(),
+  RECALL_BOT_NAME: z.preprocess(blankToUndefined, z.string().max(100).default('Meeting Copilot')),
+  /** Public https base URL of this server, reachable by Recall for webhooks (an ngrok/cloudflared tunnel in dev). */
+  PUBLIC_SERVER_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
+
   INTERNAL_API_SECRET: z.string().default('change-me-to-a-long-random-string'),
   DEFAULT_PROJECT_ID: z.string().default('default'),
   DATA_DIR: z.string().default('./data'),
@@ -53,6 +65,10 @@ export const config = {
   livekitConfigured: Boolean(env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET),
   anthropicConfigured: Boolean(env.ANTHROPIC_API_KEY),
   internalSecretIsDefault: env.INTERNAL_API_SECRET === 'change-me-to-a-long-random-string',
+  recallFake: env.RECALL_API_KEY === 'fake' && env.NODE_ENV !== 'production',
+  recallConfigured: Boolean(env.RECALL_API_KEY && env.PUBLIC_SERVER_URL) && !(env.RECALL_API_KEY === 'fake' && env.NODE_ENV === 'production'),
+  recallBaseUrl: `https://${env.RECALL_REGION}.recall.ai`,
+  publicServerUrl: env.PUBLIC_SERVER_URL?.replace(/\/$/, ''),
 };
 
 export type Config = typeof config;

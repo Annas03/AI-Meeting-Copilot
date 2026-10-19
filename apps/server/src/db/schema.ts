@@ -1,4 +1,4 @@
-import type { Answer, MeetingState } from '@copilot/shared';
+import type { Answer, BotStatus, MeetingPlatform, MeetingSource, MeetingState } from '@copilot/shared';
 import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
@@ -11,6 +11,13 @@ export const meetings = pgTable('meetings', {
   status: text('status').$type<'scheduled' | 'live' | 'ended'>().notNull().default('live'),
   createdAt: ts('created_at').notNull().defaultNow(),
   endedAt: ts('ended_at'),
+  /** 'livekit' for our own rooms; 'recall' when a meeting bot sits in an external Zoom / Google Meet call. */
+  source: text('source').$type<MeetingSource>().notNull().default('livekit'),
+  platform: text('platform').$type<MeetingPlatform>(),
+  meetingUrl: text('meeting_url'),
+  botId: text('bot_id'),
+  botStatus: text('bot_status').$type<BotStatus>(),
+  botUpdatedAt: ts('bot_updated_at'),
 });
 
 export const participants = pgTable('participants', {
@@ -88,7 +95,13 @@ CREATE TABLE IF NOT EXISTS meetings (
   room_name text NOT NULL UNIQUE,
   status text NOT NULL DEFAULT 'live',
   created_at timestamptz NOT NULL DEFAULT now(),
-  ended_at timestamptz
+  ended_at timestamptz,
+  source text NOT NULL DEFAULT 'livekit',
+  platform text,
+  meeting_url text,
+  bot_id text,
+  bot_status text,
+  bot_updated_at timestamptz
 );
 CREATE TABLE IF NOT EXISTS participants (
   identity text PRIMARY KEY,
@@ -139,4 +152,12 @@ CREATE TABLE IF NOT EXISTS briefings (
   generated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (meeting_id, state_version)
 );
+-- Columns added after the first release; keeps existing data directories working without migrations.
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'livekit';
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS platform text;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS meeting_url text;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS bot_id text;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS bot_status text;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS bot_updated_at timestamptz;
+CREATE INDEX IF NOT EXISTS meetings_bot_id_idx ON meetings(bot_id);
 `;

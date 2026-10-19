@@ -1,6 +1,7 @@
 import type {
   AgentStatus,
   Answer,
+  BotStatus,
   Briefing,
   MeetingEvent,
   MeetingState,
@@ -26,6 +27,8 @@ export interface CopilotState {
   socket: SocketStatus;
   agentStatus: AgentStatus | 'unknown';
   agentDetail?: string;
+  /** Lifecycle of the meeting bot, for external (Zoom / Google Meet) meetings. */
+  botStatus?: BotStatus;
   participants: Participant[];
   /** Final segments in order plus the latest partial per segmentId. */
   transcript: TranscriptSegment[];
@@ -129,7 +132,7 @@ export function copilotReducer(state: CopilotState, action: CopilotAction): Copi
 function applyEvent(state: CopilotState, event: MeetingEvent): CopilotState {
   switch (event.event) {
     case 'agent.status':
-      return { ...state, agentStatus: event.status, agentDetail: event.detail };
+      return { ...state, agentStatus: event.status, agentDetail: event.detail, botStatus: event.botStatus ?? state.botStatus };
     case 'participant.joined': {
       const others = state.participants.filter((p) => p.identity !== event.participant.identity);
       return { ...state, participants: [...others, event.participant] };

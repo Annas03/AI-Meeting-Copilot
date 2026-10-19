@@ -4,6 +4,7 @@ import {
   HealthResponseSchema,
   JoinMeetingResponseSchema,
   MeetingSummarySchema,
+  OkResponseSchema,
   SESSION_HEADER,
   StateResponseSchema,
   TranscriptResponseSchema,
@@ -64,4 +65,7 @@ export const api = {
     request(`/api/meetings/${meetingId}/transcript`, TranscriptResponseSchema, { session }),
   getBriefing: (meetingId: string, session: string) =>
     request(`/api/meetings/${meetingId}/briefing`, BriefingResponseSchema, { session }),
+  /** Ends the meeting; for external meetings this also removes the copilot bot from the call. */
+  endMeeting: (meetingId: string, session: string) =>
+    request(`/api/meetings/${meetingId}/end`, OkResponseSchema, { method: 'POST', session }),
 };

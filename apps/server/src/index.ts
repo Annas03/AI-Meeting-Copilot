@@ -2,6 +2,10 @@ import { createServer } from 'node:http';
 import { Knowledge } from '@copilot/knowledge';
 import { WsClientMessageSchema, type WsServerMessage } from '@copilot/shared';
 import { WebSocketServer } from 'ws';
+import { BotMeetingManager } from './bots/manager.js';
+import { RecallBotProvider } from './bots/recall/client.js';
+import { FakeRecallProvider } from './bots/recall/fake.js';
+import { realtimeEndpointToken } from './bots/recall/webhook.js';
 import { config } from './config.js';
 import { BriefingService } from './copilot/briefing.js';
 import { QuestionDetector } from './copilot/detector.js';
@@ -17,8 +21,10 @@ const VERSION = '0.1.0';
 
 async function main(): Promise<void> {
   if (config.internalSecretIsDefault) logger.warn('INTERNAL_API_SECRET is the default value; set a random secret in .env');
-  if (!config.livekitConfigured) logger.warn('LiveKit is not configured; joining meetings will fail until LIVEKIT_* are set');
+  if (!config.livekitConfigured) logger.warn('LiveKit is not configured; meetings run in text-only mode until LIVEKIT_* are set');
   if (!config.anthropicConfigured) logger.warn('ANTHROPIC_API_KEY is not set; answers and memory run in degraded mode');
+  if (config.RECALL_API_KEY && !config.PUBLIC_SERVER_URL) logger.warn('RECALL_API_KEY is set but PUBLIC_SERVER_URL is not; attaching to Zoom / Google Meet is disabled');
+  if (config.recallConfigured && !config.RECALL_WEBHOOK_SECRET) logger.warn('RECALL_WEBHOOK_SECRET is not set; Recall webhook signatures are not verified');
 
   const { db, close } = await openDatabase(config.dataDir);
   logger.info({ dataDir: config.dataDir }, 'database ready');
@@ -49,7 +55,9 @@ async function main(): Promise<void> {
   const meetings = new MeetingService({ db, hub, knowledge, memory, briefings, detector, investigations, logger });
   meetingsRef = meetings;
 
-  const app = createApp({ meetings, investigations, memory, briefings, knowledge, logger, version: VERSION });
+  const bots = config.recallConfigured ? createBotManager(meetings) : undefined;
+
+  const app = createApp({ meetings, investigations, memory, briefings, knowledge, ...(bots ? { bots } : {}), logger, version: VERSION });
   const server = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
@@ -95,7 +103,16 @@ async function main(): Promise<void> {
   });
 
   server.listen(config.PORT, () => {
-    logger.info({ port: config.PORT, livekit: config.livekitConfigured, anthropic: config.anthropicConfigured, models: { answer: config.ANSWER_MODEL, classifier: config.CLASSIFIER_MODEL, memory: config.MEMORY_MODEL } }, 'server listening');
+    logger.info(
+      {
+        port: config.PORT,
+        livekit: config.livekitConfigured,
+        anthropic: config.anthropicConfigured,
+        recall: config.recallConfigured,
+        models: { answer: config.ANSWER_MODEL, classifier: config.CLASSIFIER_MODEL, memory: config.MEMORY_MODEL },
+      },
+      'server listening',
+    );
   });
 
   const shutdown = async (signal: string) => {
@@ -107,6 +124,21 @@ async function main(): Promise<void> {
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
+}
+
+/** Recall.ai meeting bots: transcript webhooks land on /api/recall/webhook, authenticated by Svix signature or the URL token. */
+function createBotManager(meetings: MeetingService): BotMeetingManager {
+  const secret = config.RECALL_WEBHOOK_SECRET;
+  // Recall requires a trailing slash before query parameters on real-time endpoint URLs.
+  const realtimeEndpointUrl = `${config.publicServerUrl}/api/recall/webhook/${secret ? `?token=${realtimeEndpointToken(secret)}` : ''}`;
+  const provider = config.recallFake
+    ? new FakeRecallProvider({ ...(secret ? { webhookSecret: secret } : {}), logger })
+    : new RecallBotProvider({ apiKey: config.RECALL_API_KEY!, baseUrl: config.recallBaseUrl, ...(secret ? { webhookSecret: secret } : {}), logger });
+  logger.info(
+    { provider: provider.name, region: config.RECALL_REGION, statusWebhookUrl: `${config.publicServerUrl}/api/recall/webhook` },
+    'meeting bots ready; add the status webhook URL to the Recall.ai dashboard',
+  );
+  return new BotMeetingManager({ provider, meetings, logger, realtimeEndpointUrl, botName: config.RECALL_BOT_NAME });
 }
 
 main().catch((err) => {

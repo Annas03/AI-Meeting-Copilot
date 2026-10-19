@@ -1,7 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import type { Knowledge } from '@copilot/knowledge';
-import type { AgentStatus, JoinMeetingResponse, MeetingSummary, Participant, TranscriptSegment } from '@copilot/shared';
-import { and, asc, eq, isNull, max } from 'drizzle-orm';
+import type {
+  AgentStatus,
+  BotStatus,
+  JoinMeetingResponse,
+  MeetingPlatform,
+  MeetingSource,
+  MeetingSummary,
+  Participant,
+  TranscriptSegment,
+} from '@copilot/shared';
+import { and, asc, eq, isNull, max, ne } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { config } from '../config.js';
 import type { AnswerContext } from '../copilot/answerer.js';
@@ -50,8 +59,15 @@ export class MeetingService {
 
   constructor(private readonly deps: MeetingServiceDeps) {}
 
-  async createMeeting(input: { title: string; projectId?: string }): Promise<MeetingSummary> {
+  async createMeeting(input: {
+    title: string;
+    projectId?: string;
+    source?: MeetingSource;
+    platform?: MeetingPlatform;
+    meetingUrl?: string;
+  }): Promise<MeetingSummary> {
     const id = nanoid(10);
+    // Every meeting keeps a room name: LiveKit meetings use it, external ones never create the room.
     const row = {
       id,
       title: input.title,
@@ -59,11 +75,14 @@ export class MeetingService {
       roomName: roomNameFor(id),
       status: 'live' as const,
       createdAt: new Date().toISOString(),
+      source: input.source ?? ('livekit' as const),
+      platform: input.platform ?? null,
+      meetingUrl: input.meetingUrl ?? null,
     };
     await this.deps.db.insert(meetings).values(row);
     this.deps.hub.emit(id, 'meeting.started', { title: input.title });
-    this.deps.logger.info({ meetingId: id, projectId: row.projectId }, 'meeting created');
-    return this.toSummary({ ...row, endedAt: null });
+    this.deps.logger.info({ meetingId: id, projectId: row.projectId, source: row.source }, 'meeting created');
+    return this.toSummary({ ...row, endedAt: null, botId: null, botStatus: null, botUpdatedAt: null });
   }
 
   async getMeeting(meetingId: string): Promise<MeetingSummary> {
@@ -92,15 +111,17 @@ export class MeetingService {
     await this.deps.db.insert(participants).values({ identity, meetingId, name, isAgent: false, sessionToken, joinedAt: new Date().toISOString() });
     this.sessions.set(sessionToken, { token: sessionToken, meetingId, identity, name });
 
-    const livekitToken = config.livekitConfigured ? await createParticipantToken({ roomName: meeting.roomName, identity, name }) : '';
+    // External meetings never get a LiveKit token: the browser only opens the companion panel.
+    const useLivekit = config.livekitConfigured && meeting.source === 'livekit';
+    const livekitToken = useLivekit ? await createParticipantToken({ roomName: meeting.roomName, identity, name }) : '';
     this.deps.hub.emit(meetingId, 'participant.joined', { participant });
 
     const state = await this.deps.memory.getState(meetingId);
     const briefingPending = state.version > 0;
     if (briefingPending) this.deps.briefings.deliverTo(meetingId, identity);
 
-    this.deps.logger.info({ meetingId, identity, textOnly: !config.livekitConfigured }, 'participant joined');
-    return { meeting, participant, livekitUrl: config.livekitConfigured ? config.LIVEKIT_URL! : '', livekitToken, sessionToken, briefingPending };
+    this.deps.logger.info({ meetingId, identity, textOnly: !useLivekit, source: meeting.source }, 'participant joined');
+    return { meeting, participant, livekitUrl: useLivekit ? config.LIVEKIT_URL! : '', livekitToken, sessionToken, briefingPending };
   }
 
   async participantLeft(meetingId: string, identity: string, name?: string): Promise<void> {
@@ -123,8 +144,8 @@ export class MeetingService {
     return session;
   }
 
-  setAgentStatus(meetingId: string, status: AgentStatus, detail?: string): void {
-    this.deps.hub.emit(meetingId, 'agent.status', { status, ...(detail ? { detail } : {}) });
+  setAgentStatus(meetingId: string, status: AgentStatus, detail?: string, botStatus?: BotStatus): void {
+    this.deps.hub.emit(meetingId, 'agent.status', { status, ...(detail ? { detail } : {}), ...(botStatus ? { botStatus } : {}) });
   }
 
   /**
@@ -214,10 +235,33 @@ export class MeetingService {
     return { meetingTitle: meeting.title, projectId: meeting.projectId, ...(repository ? { repository } : {}), state, recentTranscript: recent };
   }
 
+  /** Idempotent: the LiveKit webhook, the meeting bot lifecycle and the user may all request it. */
   async endMeeting(meetingId: string): Promise<void> {
-    await this.deps.db.update(meetings).set({ status: 'ended', endedAt: new Date().toISOString() }).where(eq(meetings.id, meetingId));
+    const updated = await this.deps.db
+      .update(meetings)
+      .set({ status: 'ended', endedAt: new Date().toISOString() })
+      .where(and(eq(meetings.id, meetingId), ne(meetings.status, 'ended')))
+      .returning({ id: meetings.id });
+    if (updated.length === 0) return;
     await this.deps.memory.flush(meetingId).catch(() => {});
     this.deps.hub.emit(meetingId, 'meeting.ended', {});
+  }
+
+  async updateBot(meetingId: string, patch: { botId?: string; botStatus?: BotStatus }): Promise<void> {
+    await this.deps.db
+      .update(meetings)
+      .set({ ...patch, botUpdatedAt: new Date().toISOString() })
+      .where(eq(meetings.id, meetingId));
+  }
+
+  async getBotId(meetingId: string): Promise<string | null> {
+    const rows = await this.deps.db.select({ botId: meetings.botId }).from(meetings).where(eq(meetings.id, meetingId)).limit(1);
+    return rows[0]?.botId ?? null;
+  }
+
+  async getMeetingByBot(botId: string): Promise<MeetingSummary | null> {
+    const rows = await this.deps.db.select().from(meetings).where(eq(meetings.botId, botId)).limit(1);
+    return rows[0] ? this.toSummary(rows[0]) : null;
   }
 
   private async repositoryFor(projectId: string): Promise<string | undefined> {
@@ -242,7 +286,18 @@ export class MeetingService {
   }
 
   private toSummary(row: typeof meetings.$inferSelect): MeetingSummary {
-    return { meetingId: row.id, title: row.title, projectId: row.projectId, roomName: row.roomName, status: row.status, createdAt: row.createdAt };
+    return {
+      meetingId: row.id,
+      title: row.title,
+      projectId: row.projectId,
+      roomName: row.roomName,
+      status: row.status,
+      createdAt: row.createdAt,
+      source: row.source,
+      ...(row.platform ? { platform: row.platform } : {}),
+      ...(row.meetingUrl ? { meetingUrl: row.meetingUrl } : {}),
+      ...(row.botStatus ? { botStatus: row.botStatus } : {}),
+    };
   }
 }
 

@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { navigate } from '../App';
 import { CopilotPanel } from '../components/CopilotPanel';
+import { platformLabel } from '../copilot/platform';
 
 interface Props {
   meetingId: string;
@@ -50,17 +51,37 @@ export function MeetingPage({ meetingId }: Props) {
 
   if (!meeting || livekitAvailable === null) return <main className="centered muted">Loading meeting...</main>;
 
+  // External meetings (a bot inside Zoom / Google Meet) never use LiveKit in the browser: this page is only the companion panel.
+  const external = meeting.source === 'recall';
+
   if (!join || !choices) {
     return (
       <main className="prejoin">
         <header className="prejoin-header">
           <h1>{meeting.title}</h1>
           <p className="muted small">
-            project <code>{meeting.projectId}</code> · room <code>{meeting.roomName}</code> · share link{' '}
-            <code>{window.location.href}</code>
+            project <code>{meeting.projectId}</code> ·{' '}
+            {external ? (
+              <>
+                {platformLabel(meeting.platform)}
+                {meeting.meetingUrl && (
+                  <>
+                    {' '}
+                    <a href={meeting.meetingUrl} target="_blank" rel="noreferrer">
+                      open meeting
+                    </a>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                room <code>{meeting.roomName}</code>
+              </>
+            )}{' '}
+            · share link <code>{window.location.href}</code>
           </p>
         </header>
-        {livekitAvailable ? (
+        {livekitAvailable && !external ? (
           <PreJoin
             defaults={{ username: '', audioEnabled: true, videoEnabled: false }}
             onSubmit={doJoin}
@@ -68,11 +89,13 @@ export function MeetingPage({ meetingId }: Props) {
             joinLabel="Join meeting"
           />
         ) : (
-          <TextOnlyJoin onSubmit={doJoin} />
+          <TextOnlyJoin onSubmit={doJoin} external={external} platform={platformLabel(meeting.platform)} />
         )}
         {joinError && <p className="error">{joinError}</p>}
         <p className="muted small notice">
-          The AI copilot transcribes and analyses this meeting. Participants are informed by this notice.
+          {external
+            ? 'The AI copilot joins the call as a visible bot participant that transcribes and analyses the conversation. Let the other participants know.'
+            : 'The AI copilot transcribes and analyses this meeting. Participants are informed by this notice.'}
         </p>
       </main>
     );
@@ -84,6 +107,14 @@ export function MeetingPage({ meetingId }: Props) {
     participantIdentity: join.participant.identity,
     participantName: join.participant.name,
   };
+
+  if (external) {
+    return (
+      <div className="meeting-layout companion">
+        <CopilotPanel session={session} meeting={join.meeting} />
+      </div>
+    );
+  }
 
   if (!join.livekitUrl || !join.livekitToken) {
     return (
@@ -130,7 +161,15 @@ export function MeetingPage({ meetingId }: Props) {
   );
 }
 
-function TextOnlyJoin({ onSubmit }: { onSubmit: (values: LocalUserChoices) => Promise<void> }) {
+function TextOnlyJoin({
+  onSubmit,
+  external = false,
+  platform,
+}: {
+  onSubmit: (values: LocalUserChoices) => Promise<void>;
+  external?: boolean;
+  platform?: string;
+}) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -147,13 +186,17 @@ function TextOnlyJoin({ onSubmit }: { onSubmit: (values: LocalUserChoices) => Pr
 
   return (
     <form onSubmit={submit} className="stack home-card">
-      <p className="muted small">LiveKit is not configured on the server, so this meeting runs in text-only mode.</p>
+      <p className="muted small">
+        {external
+          ? `This is the companion panel for a ${platform ?? 'external'} meeting: keep it open next to the call to follow the transcript and answers.`
+          : 'LiveKit is not configured on the server, so this meeting runs in text-only mode.'}
+      </p>
       <label>
         Your name
         <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} autoFocus />
       </label>
       <button type="submit" disabled={busy || !name.trim()}>
-        {busy ? 'Joining...' : 'Join (text only)'}
+        {busy ? 'Joining...' : external ? 'Open companion panel' : 'Join (text only)'}
       </button>
     </form>
   );

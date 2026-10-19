@@ -112,8 +112,12 @@ code {
   grid-template-rows: 100%;
 }
 .meeting-video { min-height: 0; min-width: 0; }
+/* Companion mode: the call itself runs in Zoom / Google Meet, so the panel gets the whole page. */
+.meeting-layout.companion { grid-template-columns: minmax(0, 1fr); }
+.companion .copilot-panel { border-left: none; width: min(960px, 100%); margin: 0 auto; }
 @media (max-width: 900px) {
   .meeting-layout { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
+  .meeting-layout.companion { grid-template-rows: 100%; }
 }
 
 /* Copilot panel */
@@ -124,6 +128,22 @@ code {
   border-left: 1px solid var(--border);
   min-height: 0;
 }
+.copilot-panel.with-bot-bar { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.bot-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  font-size: 13px;
+}
+.bot-bar.waiting { border-left-color: var(--warn); background: rgba(242, 184, 75, 0.08); }
+.bot-bar.live { border-left-color: var(--ok); }
+.bot-bar.failed { border-left-color: var(--bad); }
+.bot-bar-text { display: grid; gap: 2px; min-width: 0; }
+.bot-bar button { white-space: nowrap; }
 .panel-header {
   display: flex;
   justify-content: space-between;

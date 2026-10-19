@@ -1,6 +1,6 @@
 # AI Engineering Meeting Copilot (MVP)
 
-A LiveKit meeting with an AI participant that listens, detects engineering questions, retrieves evidence from a pre-indexed codebase, and answers in a side panel with file references. It keeps structured meeting memory and briefs late joiners. Repository access is read-only.
+A LiveKit meeting with an AI participant that listens, detects engineering questions, retrieves evidence from a pre-indexed codebase, and answers in a side panel with file references. It keeps structured meeting memory and briefs late joiners. Repository access is read-only. The same copilot can attach to an existing Zoom or Google Meet call through a Recall.ai meeting bot (see [Attach to a Zoom or Google Meet meeting](#attach-to-a-zoom-or-google-meet-meeting)).
 
 Everything is TypeScript and runs on Windows without Docker or Python: LiveKit Cloud for media, a local Qdrant binary for vectors, embedded PostgreSQL (PGlite) for state, Voyage AI for embeddings, and Claude for reasoning.
 
@@ -18,6 +18,9 @@ Everything is TypeScript and runs on Windows without Docker or Python: LiveKit C
                           PGlite (data/pg)        packages/knowledge ─▶ Qdrant (vectors)
                                                        ▲
                                         indexer CLI: discover → chunk → embed → store → sync
+
+ Zoom / Google Meet  ◀──  Recall.ai bot  ──webhooks──▶  apps/server /api/recall/webhook ─▶ same pipeline
+   (companion panel in the browser, no LiveKit)          bot status + speaker-labelled transcript
 ```
 
 | Package | Role |
@@ -25,6 +28,7 @@ Everything is TypeScript and runs on Windows without Docker or Python: LiveKit C
 | `apps/web` | Vite + React meeting UI: pre-join, video grid, copilot panel (answers, transcript, memory, briefing) |
 | `apps/server` | Meetings, LiveKit tokens, event hub, question detector, retrieval, answer streaming, memory, briefings |
 | `apps/agent` | LiveKit agent worker: joins every meeting room, transcribes each speaker, publishes captions, feeds the server |
+| `apps/server/src/bots` | Zoom / Google Meet attach: Recall.ai bot provider and the webhook → transcript segment bridge |
 | `packages/knowledge` | Repository indexer and semantic search (Qdrant + Voyage, or an offline fake provider) |
 | `packages/shared` | Zod schemas for the event protocol and REST API, shared by all apps |
 
@@ -71,6 +75,21 @@ With the server running, `node scripts/smoke.mjs` creates a meeting, joins in te
 
 The dev injector is `POST /api/dev/meetings/:id/transcript` with `{ "speakerName": "...", "text": "..." }`, authenticated with either the session token header `x-session-token` or the internal secret header `x-internal-secret`. It is disabled when `NODE_ENV=production`.
 
+### Attach to a Zoom or Google Meet meeting
+
+Most teams meet in Zoom or Google Meet rather than in this app, so the copilot can also join those calls as a **Recall.ai meeting bot**. The bot is a visible participant that streams a speaker-labelled transcript to the server; everything after that (question detection, retrieval, answers, memory, briefings) is the same pipeline, and the web app becomes a companion panel you keep open next to the call.
+
+1. Create a Recall.ai account (recall.ai), pick a region and create an API key. Pay-as-you-go pricing is per recording hour plus a transcription fee, with some free hours to start.
+2. Expose the server publicly, because Recall delivers webhooks: in dev run `ngrok http 8787` (or `cloudflared tunnel --url http://127.0.0.1:8787`) and put the https URL in `.env` as `PUBLIC_SERVER_URL`.
+3. Set `RECALL_API_KEY`, `RECALL_REGION` and (recommended) `RECALL_WEBHOOK_SECRET`, then restart the server. It logs the status webhook URL (`<PUBLIC_SERVER_URL>/api/recall/webhook`): add it in the Recall dashboard and subscribe to the bot status events. Transcript events are configured per bot automatically.
+4. On the home page, paste the Zoom or Meet link into **Zoom / Google Meet link** and create the meeting. The bot knocks; **admit it from the meeting lobby**. The companion panel shows the bot's status, the live transcript and the answers; **End & remove bot** pulls it out of the call.
+
+Only Zoom and Google Meet links are accepted for now. Without `RECALL_API_KEY` and `PUBLIC_SERVER_URL` the link field is hidden and the LiveKit flow is unchanged.
+
+Offline check without a Recall account: set `RECALL_API_KEY=fake` and `PUBLIC_SERVER_URL=http://127.0.0.1:8787`, start the server and run `node scripts/recall-smoke.mjs`. It creates an external meeting and replays Recall webhooks (status changes, partial and final transcript events, a duplicate delivery, call end) through `/api/recall/webhook`, signed when `RECALL_WEBHOOK_SECRET` is set, then checks the transcript, the detected question and the meeting end.
+
+Known limitation: in-flight partial utterances live in server memory, so a restart mid-call drops at most one partial per speaker; bot ids are persisted and webhooks keep flowing afterwards.
+
 ## How a question becomes an answer
 
 1. The agent subscribes to every participant's audio track and runs one streaming STT session per speaker (LiveKit Inference `deepgram/nova-3` by default, or the Deepgram plugin with `STT_PROVIDER=deepgram`). Interim results are published as partial captions; the finished utterance is sent once as a final segment.
@@ -93,6 +112,8 @@ All variables are documented in [.env.example](.env.example). Notable ones:
 | `ANSWER_EFFORT` | `low` | Reasoning effort for answers; raise to `medium` for harder questions |
 | `RETRIEVAL_LIMIT` / `RETRIEVAL_MIN_SCORE` | 8 / 0.25 | Chunks per question and the score below which evidence is treated as weak |
 | `QDRANT_URL` / `QDRANT_API_KEY` | local | Point at Qdrant Cloud instead of the local binary |
+| `RECALL_API_KEY` / `RECALL_REGION` | unset / `us-east-1` | Enable Zoom / Google Meet attach through Recall.ai (`fake` = offline provider) |
+| `RECALL_WEBHOOK_SECRET` / `PUBLIC_SERVER_URL` | unset | Svix secret for webhook verification; public base URL Recall posts webhooks to |
 | `DATA_DIR` | `./data` | PGlite database, Qdrant storage and index manifests |
 
 ## Indexing details
@@ -104,10 +125,11 @@ The indexer lists files with `git ls-files` (tracked plus untracked-but-not-igno
 - `npm run typecheck` and `npm test` pass (shared, knowledge, server, web, agent).
 - Offline: Qdrant binary runs, this repository indexes and searches with correct file references, `scripts/smoke.mjs` passes against the server (transcript, detection, memory, briefing, WebSocket events).
 - Live meeting flow (LiveKit Cloud + Claude + Voyage) requires the keys in `.env` and has not been exercised on this machine yet.
+- Zoom / Google Meet attach: provider mappers, signature verification and the bot manager are unit-tested, and `scripts/recall-smoke.mjs` passes offline with the fake provider. A real Recall.ai bot has not been exercised yet.
 
 ## Not in the MVP (by design)
 
-Automatic code changes, pull requests, multi-agent workflows, Microsoft Teams integration, Redis-backed job queues, and the deep-investigation path (Phase 6). Transcripts and answers are retained in `data/` indefinitely; add a retention policy before real use.
+Automatic code changes, pull requests, multi-agent workflows, Microsoft Teams integration (Teams links are rejected by the bot path), Redis-backed job queues, and the deep-investigation path (Phase 6). Transcripts and answers are retained in `data/` indefinitely; add a retention policy before real use.
 
 ## Security notes
 
